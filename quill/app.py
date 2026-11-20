@@ -18,7 +18,7 @@ from . import sudo
 from .engine import Engine, describe_tool
 from .sprites import PALETTE, frame
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 BG = "#1a1c2c"
 
 GREETING = ("Hi! I'm **Quill**, your desk robot. "

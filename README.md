@@ -4,7 +4,7 @@
 
 `Python` `Textual` `Claude Code` `stream-json` `Sweetie 16`
 
-**v0.1.0 — In testing**
+**v0.2.0 — Stable**
 
 ---
 
