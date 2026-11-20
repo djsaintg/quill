@@ -1,8 +1,74 @@
 #!/usr/bin/env bash
-# Start Quill in the current folder. Any flags go straight to Claude Code (e.g. quill -c).
-DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
-if [[ ! -x "$DIR/.venv/bin/python" ]]; then
-  echo "Quill isn't set up yet. Run the setup step in $DIR/README.md first (make the .venv)." >&2
-  exit 1
-fi
-PYTHONPATH="$DIR" exec "$DIR/.venv/bin/python" -m quill "$@"
+# Start Quill (or Plume, when run as `plume`) in the current folder.
+# Any flags go straight to Claude Code (e.g. quill -c).
+#   /exit or Ctrl+Q  -> Quill exits with 77 -> this closes the terminal window too
+#   /terminal        -> Quill exits with 3  -> you're back at a normal prompt
+#
+# Everything is inside main(), which bash reads in full before running it, so editing
+# this file while Quill is open can't make a running launcher do something odd.
+
+# Shells and wrappers allowed between Quill and the terminal window. Anything else in
+# the way (Claude Code, tmux, an editor, a script) means: don't close anything.
+SHELLS='^-?(bash|zsh|fish|sh|dash)$'
+TERMINALS='^(xfce4-terminal|konsole|gnome-terminal-|gnome-terminal|kgx|ptyxis|tilix|terminator|kitty|alacritty|wezterm-gui|foot|xterm|urxvt|lxterminal|mate-terminal|qterminal|ghostty|yakuake)$'
+
+window_shell() {
+  # Walk up from our parent shell to the shell the terminal window started; print its pid.
+  # Besides shells, it may pass through "shell wrappers" you list in Quill's config
+  # (programs that run a shell inside them, e.g. terminal effects): QUILL_WRAPPERS.
+  local pid=${1:-$PPID} comm args parent w ok
+  for _ in 1 2 3 4 5 6 7 8; do
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
+    args=$(ps -o args= -p "$pid" 2>/dev/null)
+    ok=0
+    [[ "$comm" =~ $SHELLS ]] && ok=1
+    for w in ${QUILL_WRAPPERS:-}; do [[ "$args" == *"$w"* ]] && ok=1; done
+    [[ $ok -eq 1 ]] || return 1
+    parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [[ -n "$parent" && "$parent" != 1 ]] || return 1
+    if [[ "$(ps -o comm= -p "$parent" 2>/dev/null)" =~ $TERMINALS ]]; then
+      [[ "$comm" =~ $SHELLS ]] && { echo "$pid"; return 0; }
+      return 1
+    fi
+    pid=$parent
+  done
+  return 1
+}
+
+main() {
+  local DIR code target
+  DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+  if [[ ! -x "$DIR/.venv/bin/python" ]]; then
+    echo "Quill isn't set up yet. Run the setup step in $DIR/README.md first (make the .venv)." >&2
+    return 1
+  fi
+  # Shell wrappers to look through when /exit closes the window ("shell_wrappers" in config)
+  QUILL_WRAPPERS=$("$DIR/.venv/bin/python" -c 'import json, os
+p = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "quill", "config.json")
+try:
+    print(" ".join(json.load(open(p)).get("shell_wrappers", [])))
+except Exception:
+    pass' 2>/dev/null)
+  # Typed as `plume`? Then Plume comes to the desk; as `quill`, Quill does.
+  case "$(basename "$0")" in
+    plume) export QUILL_AS=plume ;;
+    quill) export QUILL_AS=quill ;;
+  esac
+  if [[ "${1:-}" == "--which-window" ]]; then   # debugging: what /exit would close
+    window_shell || echo "none"
+    return 0
+  fi
+  PYTHONPATH="$DIR" "$DIR/.venv/bin/python" -m quill "$@"
+  code=$?
+  if [[ $code -eq 77 ]]; then
+    if [[ -t 0 && -z "${CLAUDECODE:-}" ]] && target=$(window_shell); then
+      kill -HUP "$target"
+    fi
+    return 0
+  fi
+  [[ $code -eq 3 ]] && return 0
+  return $code
+}
+
+main "$@"
+exit $?

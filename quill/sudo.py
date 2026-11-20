@@ -39,6 +39,22 @@ SYSTEM_NOTE = (
 )
 
 
+def load_config():
+    try:
+        with open(CONFIG) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def set_config(key, value):
+    cfg = load_config()
+    cfg[key] = value
+    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    with open(CONFIG, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+
 def load_mode():
     try:
         with open(CONFIG) as f:

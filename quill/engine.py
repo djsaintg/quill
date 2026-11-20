@@ -20,6 +20,22 @@ BASE_ARGS = [
 ]
 
 
+# Settings a parent Claude Code session leaves in the environment. If Quill is started
+# from inside Claude Code (e.g. a `!` command), passing these on would make the child
+# reuse that session's ID and messaging socket.
+INHERITED = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_PID",
+             "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+             "CLAUDE_CODE_CHILD_NOTES_DIR", "CLAUDE_CODE_SESSION_ATTENDED",
+             "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_EFFORT", "AI_AGENT")
+
+
+def clean_env(env=None):
+    env = dict(os.environ if env is None else env)
+    for k in INHERITED:
+        env.pop(k, None)
+    return env
+
+
 def find_claude():
     """The real claude binary, never a `claude` alias/wrapper pointing back at Quill."""
     override = os.environ.get("QUILL_CLAUDE_BIN")
@@ -38,6 +54,7 @@ class Engine:
         self.cwd = cwd or os.getcwd()
         self.proc = None
         self.stderr_tail = []
+        self.waiting = {}  # request_id -> future, for control requests that need a reply
 
     async def start(self):
         self.proc = await asyncio.create_subprocess_exec(
@@ -46,7 +63,7 @@ class Engine:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.cwd,
-            env=self.env,
+            env=clean_env(self.env),
             limit=64 * 1024 * 1024,  # a single line can carry a whole file
         )
         asyncio.create_task(self._drain_stderr())
@@ -63,9 +80,30 @@ class Engine:
         await self.proc.stdin.drain()
 
     async def control(self, request):
-        await self._send({"type": "control_request",
-                          "request_id": f"quill-{uuid.uuid4().hex[:12]}",
-                          "request": request})
+        rid = f"quill-{uuid.uuid4().hex[:12]}"
+        await self._send({"type": "control_request", "request_id": rid, "request": request})
+        return rid
+
+    async def request(self, request, timeout=45):
+        """Send a control request and wait for Claude Code's reply to it."""
+        rid = f"quill-{uuid.uuid4().hex[:12]}"
+        fut = asyncio.get_running_loop().create_future()
+        self.waiting[rid] = fut
+        await self._send({"type": "control_request", "request_id": rid, "request": request})
+        try:
+            return await asyncio.wait_for(fut, timeout)
+        finally:
+            self.waiting.pop(rid, None)
+
+    def resolve(self, ev):
+        """Hand a control_response to whoever is waiting for it."""
+        resp = ev.get("response") or {}
+        fut = self.waiting.get(resp.get("request_id"))
+        if fut and not fut.done():
+            if resp.get("subtype") == "error":
+                fut.set_exception(RuntimeError(resp.get("error") or "Claude Code said no"))
+            else:
+                fut.set_result(resp.get("response") or {})
 
     async def say(self, text):
         await self._send({"type": "user",

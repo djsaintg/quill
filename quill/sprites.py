@@ -1,4 +1,4 @@
-"""Pixel-art sprites for Quill, drawn in the Sweetie 16 palette (same as Crew).
+"""Pixel-art sprites for Quill and Plume, drawn in the Sweetie 16 palette.
 
 Each sprite is a list of equal-length strings; one character = one pixel.
 '.' is transparent. Rendered in the terminal with half-block characters,
@@ -6,22 +6,22 @@ so two pixel rows fit in one text row and pixels come out square.
 """
 
 PALETTE = {
-    "k": "#1a1c2c",  # outline / near-black (Crew --bg)
+    "k": "#1a1c2c",  # outline / near-black
     "p": "#5d275d",  # plum
     "r": "#b13e53",  # red
     "o": "#ef7d57",  # orange
-    "y": "#ffcd75",  # yellow (Crew --warn)
+    "y": "#ffcd75",  # yellow
     "l": "#a7f070",  # lime
-    "g": "#38b764",  # green (Crew --good)
+    "g": "#38b764",  # green
     "t": "#257179",  # teal
     "n": "#29366f",  # navy
     "b": "#3b5dc9",  # blue
-    "c": "#41a6f6",  # sky (Crew --accent)
+    "c": "#41a6f6",  # sky
     "a": "#73eff7",  # aqua
-    "w": "#f4f4f4",  # white (Crew --ink)
-    "s": "#94b0c2",  # light grey (Crew --muted)
-    "m": "#566c86",  # grey (Crew --line)
-    "d": "#333c57",  # dark slate (Crew --card)
+    "w": "#f4f4f4",  # white
+    "s": "#94b0c2",  # light grey
+    "m": "#566c86",  # grey
+    "d": "#333c57",  # dark slate
 }
 
 # --- Option A: the owl clerk (spectacles, quill tucked behind the ear) ---
@@ -157,3 +157,58 @@ def frame(face="idle", bulb="idle"):
         rows[5 + i][4:12] = list(line)
     rows[0][7] = rows[0][8] = BULB[bulb]
     return ["".join(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Plume (option B of the mock-ups): Quill's body with a feather ("plume") in
+# place of the antenna, eyelashes, rosy cheeks, a red smile and pearls.
+# Her face lives on rows 7-11, columns 4-11; the feather tip (row 0) shows her mood.
+# ---------------------------------------------------------------------------
+
+PLUME = [
+    "..........www...",
+    ".........wsww...",
+    "........wsw.....",
+    ".......kw.......",
+    "..kkkkkkkkkkkk..",
+    ".kssssssssssssk.",
+    ".kskkkkkkkkkksk.",
+    ".ksktkttttktksk.",
+    ".ksktaattaatksk.",
+    ".ksktaattaatksk.",
+    ".kskrttttttrksk.",
+    ".ksktttrrtttksk.",
+    ".kskkkkkkkkkksk.",
+    ".kssssssssssmsk.",
+    "..kkkkkkkkkkkk..",
+    "....kddddddk....",
+    "...kdwdwwdwdk...",
+    "...kddddddddk...",
+    "...kkkkkkkkkk...",
+    "....km....mk....",
+]
+
+PLUME_TIP = {"idle": "w", "think": "a", "work": "o", "ask": "r", "off": "m", "happy": "l"}
+
+CHARACTERS = ("quill", "plume")
+
+
+def plume_frame(face="idle", bulb="idle"):
+    rows = [list(r) for r in PLUME]
+    lines = [list(l) for l in FACES[face]]
+    if lines[0][1] == "t" and lines[0][6] == "t":
+        lines[0][1] = lines[0][6] = "k"           # lashes, unless the eyes moved up there
+    for i in (3, 4):                              # her mouth is red
+        lines[i] = ["r" if c == "a" else c for c in lines[i]]
+    if lines[3][0] == "t":
+        lines[3][0] = "r"                         # cheeks
+    if lines[3][7] == "t":
+        lines[3][7] = "r"
+    for i, line in enumerate(lines):
+        rows[7 + i][4:12] = line
+    rows[0][10:13] = [PLUME_TIP[bulb]] * 3
+    return ["".join(r) for r in rows]
+
+
+def sprite(who="quill", face="idle", bulb="idle"):
+    return plume_frame(face, bulb) if who == "plume" else frame(face, bulb)

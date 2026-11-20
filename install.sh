@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Puts `quill` on your PATH and (optionally) makes typing `claude` open Quill.
+# Puts `quill` and `plume` on your PATH and (optionally) makes typing `claude` open Quill.
 #   ./install.sh           quill command only
 #   ./install.sh --alias   also: claude -> quill   (plain Claude Code stays at: command claude)
 set -euo pipefail
 DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 mkdir -p "$HOME/.local/bin"
 ln -sf "$DIR/bin/quill" "$HOME/.local/bin/quill"
-echo "✓ quill -> $HOME/.local/bin/quill"
+ln -sf "$DIR/bin/quill" "$HOME/.local/bin/plume"
+echo "✓ quill and plume -> $HOME/.local/bin/ (each opens its own character)"
 if [[ "${1:-}" == "--alias" ]]; then
   LINE="alias claude='quill'  # Quill: plain Claude Code is 'command claude'"
   for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
