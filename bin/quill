@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Start Quill in the current folder. Any flags go straight to Claude Code (e.g. quill -c).
+DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+if [[ ! -x "$DIR/.venv/bin/python" ]]; then
+  echo "Quill isn't set up yet. Run the setup step in $DIR/README.md first (make the .venv)." >&2
+  exit 1
+fi
+PYTHONPATH="$DIR" exec "$DIR/.venv/bin/python" -m quill "$@"
