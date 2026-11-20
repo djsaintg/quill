@@ -101,6 +101,8 @@ Quill runs `claude -p --input-format stream-json --output-format stream-json --p
 - Linux only for now (sudo support, window closing and pop-ups rely on Linux tools).
 - Some built-in Claude Code `/commands` don't work in headless mode. Skills and custom commands pass through.
 
+What's next: [ROADMAP.md](ROADMAP.md). What changed: [CHANGELOG.md](CHANGELOG.md).
+
 `preview.py` shows the four character designs that were considered (Quill is option D); `docs/plume_preview.py` shows the Plume mock-ups (Plume is option B).
 
 ## 📄 License
