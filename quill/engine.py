@@ -32,8 +32,9 @@ def find_claude():
 
 
 class Engine:
-    def __init__(self, extra_args=None, cwd=None):
+    def __init__(self, extra_args=None, cwd=None, env=None):
         self.extra_args = list(extra_args or [])
+        self.env = env
         self.cwd = cwd or os.getcwd()
         self.proc = None
         self.stderr_tail = []
@@ -45,6 +46,7 @@ class Engine:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.cwd,
+            env=self.env,
             limit=64 * 1024 * 1024,  # a single line can carry a whole file
         )
         asyncio.create_task(self._drain_stderr())

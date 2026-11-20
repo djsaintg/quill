@@ -14,6 +14,9 @@
 - ✅ **Permission buttons**: Yes / Yes, don't ask again / No, or type what to do instead
 - ❓ **Questions as buttons**: Claude's multiple-choice questions become clickable options
 - 📜 **History**: F2 shows the whole chat so far
+- 📋 **Copy anything**: drag over text + Ctrl+C, or F3 for the whole reply (works even in terminals without OSC 52, via `xclip`/`wl-copy`)
+- 🔐 **Optional sudo**: approve root commands and type your password right in Quill
+- 📐 **Fits small windows**: Quill shrinks to half size when space is tight
 - 🔌 **Uses your own `claude`**: same login, memory, skills and settings, no extra cost
 
 ## 🚀 Install
@@ -36,7 +39,17 @@ uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt
 | `Esc` | stop Quill mid-answer |
 | `F2` or `/history` | chat history |
 | `/new` | fresh conversation |
+| `F3` or `/copy` | copy Quill's last reply |
+| drag + `Ctrl+C` | copy just the part you selected |
+| `/sudo` / `/sudo off` | let Quill use sudo, or stop it |
 | `Ctrl+Q` or `/quit` | leave |
+
+## 🔐 Sudo
+Off by default. `/sudo` offers **Just this chat** or **Permanently**, then either **Ask me each time** (every root command is shown and waits for your OK) or **Allow whenever** (root commands run without asking). Each choice has a second "Are you sure?" step.
+
+- Your password lives in memory only, is typed once per Quill window, and is never written to disk.
+- Claude's `sudo` is routed through a tiny shim → `sudo -A` → Quill's askpass helper → a private socket (0600). Quill only answers helpers whose parent is a real, running `sudo`.
+- ⚠️ **Allow whenever** means Claude can run anything as root without showing you. Use it knowingly.
 
 ## 🛠️ How it works
 Quill runs `claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio` behind the scenes. Claude Code's own screen is switched off; Quill reads its JSON events and draws its own screen with [Textual](https://textual.textualize.io/). Quill is drawn in the Sweetie 16 palette, using half-block characters so the pixels come out square.

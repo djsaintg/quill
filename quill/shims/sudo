@@ -1,0 +1,4 @@
+#!/bin/sh
+# Quill puts this folder first on PATH for Claude Code, so `sudo` asks for the
+# password in Quill's window (via SUDO_ASKPASS) instead of a terminal it can't reach.
+exec "${QUILL_REAL_SUDO:-/usr/bin/sudo}" -A "$@"
