@@ -15,6 +15,14 @@ def project_dir(cwd=None):
     return os.path.join(base, "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd or os.getcwd()))
 
 
+def strip_quill_note(text):
+    """Quill puts a note in front of a message after a /character switch, and sends one on
+    its own for the wrap-up on /exit. Neither is something you typed."""
+    if not text or not text.startswith("[Quill note:"):
+        return text
+    return text.split("]\n\n", 1)[1].strip() if "]\n\n" in text else ""
+
+
 def _user_text(o):
     if o.get("isMeta") or o.get("isSidechain"):
         return None
@@ -26,7 +34,7 @@ def _user_text(o):
                             if isinstance(b, dict) and b.get("type") == "text")
     if not isinstance(content, str):
         return None
-    content = content.strip()
+    content = strip_quill_note(content.strip())
     if not content or content.startswith("<"):  # command wrappers, reminders
         return None
     return content
@@ -420,3 +428,116 @@ def ago(ts):
 def one_line(text, n=70):
     text = " ".join(text.split())
     return text if len(text) <= n else text[: n - 1] + "…"
+
+
+# ---------- every chat, for /resume and `quill --resume` ----------
+TITLES = os.path.join(os.path.dirname(CACHE), "chats.json")
+TITLE_RE = re.compile(rb'"type":\s*"(custom-title|ai-title)",\s*"(?:customTitle|aiTitle)":\s*"((?:[^"\\]|\\.)*)"')
+SESSION_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _ends(path, n=2_000_000):
+    """The first and last `n` bytes of a file (all of it if it's small)."""
+    with open(path, "rb") as f:
+        head = f.read(n)
+        size = os.fstat(f.fileno()).st_size
+        if size <= n:
+            return head, b""
+        f.seek(max(n, size - n))
+        return head, f.read()
+
+
+def _title(head, tail):
+    """The chat's name: one you gave it, else the one Claude Code made up for it."""
+    found = {}
+    for part in (head, tail):
+        for m in TITLE_RE.finditer(part):
+            found[m.group(1)] = m.group(2)
+    raw = found.get(b"custom-title") or found.get(b"ai-title")
+    if not raw:
+        return None
+    try:
+        return json.loads(b'"' + raw + b'"')
+    except ValueError:
+        return raw.decode(errors="replace")
+
+
+def _first_you(head):
+    for line in head.decode("utf-8", errors="replace").splitlines()[:400]:
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        if o.get("type") == "user":
+            text = _user_text(o)
+            if text:
+                return text
+    return None
+
+
+def chats(search=None):
+    """Every saved chat you said something in, newest first: session, path, chat_cwd,
+    folder, name, when, title, first_you, last_you. `search` keeps the ones whose
+    title, project or messages mention it (any case)."""
+    base = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"),
+                        "projects")
+    try:
+        with open(TITLES) as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        cache = {}
+    attrib = _load_cache()
+    out, dirty = [], False
+    for path in glob.glob(os.path.join(base, "*", "*.jsonl")):
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        key = f"{st.st_mtime}:{st.st_size}"
+        hit = cache.get(path)
+        if not hit or hit.get("key") != key:
+            try:
+                head, tail = _ends(path)
+            except OSError:
+                continue
+            last = None
+            for line in reversed((tail or head).decode("utf-8", errors="replace").splitlines()):
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                if o.get("type") == "user":
+                    last = _user_text(o)
+                    if last:
+                        break
+            hit = {"key": key, "title": _title(head, tail), "first_you": _first_you(head),
+                   "last_you": last, "cwd": _session_cwd(path)}
+            cache[path], dirty = hit, True
+        cwd = hit.get("cwd")
+        if not cwd or not (hit.get("first_you") or hit.get("last_you")):
+            continue  # nothing you said: a tool run, not a chat
+        a = attrib.get(path)
+        folder = (a[1] if a and a[1] else None) or cwd
+        c = {"session": os.path.basename(path)[:-6], "path": path, "chat_cwd": cwd,
+             "folder": folder, "name": os.path.basename(folder.rstrip("/")) or folder,
+             "when": st.st_mtime, "title": hit.get("title"), "first_you": hit.get("first_you"),
+             "last_you": hit.get("last_you") or hit.get("first_you"), "next": None,
+             "next_from": None}
+        if search:
+            hay = " ".join(str(c[k] or "") for k in ("title", "folder", "first_you", "last_you"))
+            if search.lower() not in hay.lower() and search.lower() != c["session"]:
+                continue
+        out.append(c)
+    if dirty:
+        try:
+            os.makedirs(os.path.dirname(TITLES), exist_ok=True)
+            with open(TITLES, "w") as f:
+                json.dump({p: v for p, v in cache.items() if os.path.exists(p)}, f)
+        except OSError:
+            pass
+    return sorted(out, key=lambda c: c["when"], reverse=True)
+
+
+def chat_label(c, n=70):
+    """How a chat reads in a list: its title, or what you first said."""
+    return one_line(c.get("title") or c.get("first_you") or "(untitled chat)", n)

@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import shutil
+import re
 import uuid
 
 BASE_ARGS = [
@@ -19,6 +20,8 @@ BASE_ARGS = [
     "--permission-prompt-tool", "stdio",
 ]
 
+
+SESSION_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 # Settings a parent Claude Code session leaves in the environment. If Quill is started
 # from inside Claude Code (e.g. a `!` command), passing these on would make the child
@@ -33,6 +36,7 @@ def clean_env(env=None):
     env = dict(os.environ if env is None else env)
     for k in INHERITED:
         env.pop(k, None)
+    env["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] = "1"  # the window title is Quill's to set
     return env
 
 
@@ -45,6 +49,53 @@ def find_claude():
         if cand and os.path.exists(cand) and "quill" not in os.path.realpath(cand):
             return cand
     raise FileNotFoundError("Couldn't find the claude command. Is Claude Code installed?")
+
+
+def strip_resume(args):
+    """Drop -c/--continue and -r/--resume <id> so we can start fresh or resume another chat."""
+    out, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+            continue
+        if a in ("-c", "--continue"):
+            continue
+        if a in ("-r", "--resume"):
+            skip = True
+            continue
+        if a.startswith("--resume="):
+            continue
+        out.append(a)
+    return out
+
+
+def resume_request(args):
+    """Read Claude Code's resume flags the way `claude` does, for `quill` and `plume`.
+
+    `-c` / `--continue` (and `--c`) and `--resume <session id>` go on to Claude Code as they
+    are. `-r` / `--resume` (and `--r`) on their own, or with a search word or chat name instead
+    of an id, open Quill's list of earlier chats. Returns (args for Claude Code, search):
+    search is None when there's no list to show, "" for every chat, or the word to look for.
+    """
+    out, search, i = [], None, 0
+    args = ["-c" if a == "--c" else "-r" if a == "--r" else a for a in args]
+    while i < len(args):
+        a = args[i]
+        if a in ("-r", "--resume") or a.startswith("--resume="):
+            if "=" in a:
+                value = a.split("=", 1)[1]
+            elif i + 1 < len(args) and not args[i + 1].startswith("-"):
+                value, i = args[i + 1], i + 1
+            else:
+                value = ""
+            if SESSION_ID.match(value):
+                out += ["--resume", value]
+            else:
+                search = value
+        else:
+            out.append(a)
+        i += 1
+    return out, search
 
 
 class Engine:

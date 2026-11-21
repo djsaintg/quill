@@ -19,7 +19,7 @@
 - 💬 **Speech-bubble chat**: Claude's replies stream into Quill's bubble as Markdown
 - 🗂️ **Pick up where you left off**: Quill's greeting lists your recent projects with the **next item on each roadmap**; continue the last chat or start fresh (the next item is put in your message box)
 - 📝 **Multi-line input**: the message box wraps and grows; paste multi-line text freely
-- 🎭 **Live moods**: thinking dots, talking mouth, eyes darting while it works, a blinking red antenna when it needs you
+- 🎭 **Live moods**: loading-square eyes while it thinks, a talking mouth, eyes darting while it works, ✗ eyes when something fails, a blinking red antenna when it needs you
 - ✅ **Permission buttons**: Yes / Yes, don't ask again / No, or type what to do instead
 - ❓ **Questions as buttons**: Claude's multiple-choice questions become clickable options
 - 📜 **History**: F2 shows the whole chat so far
@@ -27,7 +27,10 @@
 - 🔐 **Optional sudo**: approve root commands and type your password right in Quill
 - 📐 **Fits small windows**: Quill shrinks to half size when space is tight
 - 🔌 **Uses your own `claude`**: same login, memory, skills and settings, no extra cost
-- 🧪 **Throwaway test repos**: ask for a "test repo" and Claude keeps it local, notes what you find, and at "wrap up" summarizes it and deletes it
+- 🧹 **Wrap-up on exit**: `/exit` first has Claude bring every changed project's docs up to date and commit/push where you'd want it, shows a summary, then closes
+- 📋 **Rules you switch on and off**: `~/.config/quill/config.md` is a checklist of rules Claude follows in every chat (wrap-up, throwaway test repos, or your own); `/rules` shows them
+- 🔎 **Every earlier chat**: `/resume` (or `quill --resume`) lists them all with their titles, newest first; type a word to search
+- 📖 **Read at your own pace**: scroll up in the bubble while Claude works and it updates quietly without pulling you back down
 
 ## 🚀 Install
 Needs Linux, [Claude Code](https://claude.com/claude-code) installed and logged in, and Python 3.10+. Optional: `notify-send` (pop-ups) and `xclip` or `wl-copy` (copying in terminals without OSC 52).
@@ -52,8 +55,11 @@ Quill runs Claude Code in **auto mode**, like a normal session: routine actions 
 |---|---|
 | anything | talk to Claude Code |
 | `\` then `Enter`, or `Ctrl+J` | new line in your message (Shift+Enter too, if your terminal sends it differently from Enter; check with `quill --keys`) |
-| `/resume` | pick a project to pick up again |
-| `quill -c` | carry on the last chat in this folder |
+| `/resume [word]`, `--resume`, `-r` | every earlier chat, newest first (type a number to open one, a word to search) |
+| `/continue`, `-c` | carry on the last chat in this folder |
+| `/projects` | your recent projects and what's next in each |
+| `quill -c` / `plume -c` (`--c` works too) | start on the last chat in this folder |
+| `quill --resume` / `plume -r [word]` | start on the list of earlier chats (searched for `word`) |
 | `quill --resume <id>` / `--model sonnet` | any Claude Code flag passes straight through |
 | `Esc` | stop Quill mid-answer |
 | `F2` or `/history` | chat history |
@@ -61,8 +67,10 @@ Quill runs Claude Code in **auto mode**, like a normal session: routine actions 
 | `F3` or `/copy` | copy Quill's last reply |
 | drag + `Ctrl+C` | copy just the part you selected |
 | `/sudo` / `/sudo off` | let Quill use sudo, or stop it |
-| `/exit` or `Ctrl+Q` | leave and close the terminal window |
-| `/terminal` | leave Quill, keep the terminal open |
+| `/exit` or `Ctrl+Q` | wrap up (docs, commits where wanted), then close the terminal window |
+| `/exit now`, or `Ctrl+Q` twice | close straight away, no wrap-up |
+| `/terminal` | wrap up, then leave Quill and keep the terminal open |
+| `/rules` | the rules Claude follows in every chat |
 | `/character [quill\|plume]` | switch characters |
 | `/name [your name]` | what your character calls you |
 | `/theme [classic\|aurora]` | change the current character's colours |
@@ -77,7 +85,14 @@ Off by default. `/sudo` offers **Just this chat** or **Permanently**, then eithe
 - ⚠️ **Allow whenever** means Claude can run anything as root without showing you. Use it knowingly.
 
 ## ⚙️ Settings
-Everything lives in `~/.config/quill/config.json` (created as you go):
+**Rules for Claude** live in `~/.config/quill/config.md`, a Markdown checklist created on first start. `[x]` is on, `[ ]` is off; reword any rule or add your own in the same shape, or just ask Quill or Plume to change it. Changes apply from the next chat.
+
+| Rule | Default | What it does |
+|---|---|---|
+| Wrap up | on | at "wrap up" or `/exit`: update every changed project's docs, commit/push where your own rules allow, summarize |
+| Test repos | off | "test repo" = throwaway local folder: never pushed, notes kept, summarized and deleted at wrap-up |
+
+Everything else lives in `~/.config/quill/config.json` (created as you go):
 
 | Key | What it does |
 |---|---|

@@ -148,7 +148,28 @@ FACES = {
     "sad":     ["tttttttt", "taattaat", "tttttttt", "ttaaaatt", "tattttat"],
 }
 
-BULB = {"idle": "y", "think": "a", "work": "o", "ask": "r", "off": "m", "happy": "l"}
+
+
+def _loading(gap, dots):
+    """Thinking: each eye is a little loading square, a 2x2 block with one pixel missing.
+    The gap goes round clockwise (gap 0-3), while the dots of the mouth fill in (1-3)."""
+    rows = [list("tttttttt") for _ in range(5)]
+    for x in (1, 5):  # left eye, right eye
+        for i, (r, dx) in enumerate(((1, 0), (1, 1), (2, 1), (2, 0))):  # TL, TR, BR, BL
+            rows[r][x + dx] = "t" if i == gap else "a"
+    for d in range(dots):
+        rows[4][1 + 2 * d] = "a"
+    return ["".join(r) for r in rows]
+
+
+for _gap in range(4):
+    for _dots in (1, 2, 3):
+        FACES[f"load{_gap}{_dots}"] = _loading(_gap, _dots)
+
+# Something failed: X eyes and a frown.
+FACES["oops"] = ["atattata", "tattttat", "atattata", "ttaaaatt", "tattttat"]
+
+BULB = {"idle": "y", "think": "a", "work": "o", "ask": "r", "off": "m", "happy": "l", "oops": "r"}
 
 
 def frame(face="idle", bulb="idle"):
@@ -188,7 +209,8 @@ PLUME = [
     "....km....mk....",
 ]
 
-PLUME_TIP = {"idle": "w", "think": "a", "work": "o", "ask": "r", "off": "m", "happy": "l"}
+PLUME_TIP = {"idle": "w", "think": "a", "work": "o", "ask": "r", "off": "m", "happy": "l",
+             "oops": "r"}
 
 CHARACTERS = ("quill", "plume")
 
@@ -196,7 +218,7 @@ CHARACTERS = ("quill", "plume")
 def plume_frame(face="idle", bulb="idle"):
     rows = [list(r) for r in PLUME]
     lines = [list(l) for l in FACES[face]]
-    if lines[0][1] == "t" and lines[0][6] == "t":
+    if "a" not in lines[0]:
         lines[0][1] = lines[0][6] = "k"           # lashes, unless the eyes moved up there
     for i in (3, 4):                              # her mouth is red
         lines[i] = ["r" if c == "a" else c for c in lines[i]]
