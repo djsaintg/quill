@@ -164,3 +164,84 @@ def describe_tool(name, inp):
     if name == "Skill":
         return f"Loading skill {inp.get('skill', '')}"
     return f"Using {name}"
+
+
+# describe_tool() says what's happening ("Reading app.py"); once a step is finished
+# its line in the bubble switches to the past tense ("Read app.py").
+PAST = [("Reading a web page", "Read a web page"), ("Reading ", "Read "), ("Editing ", "Edited "),
+        ("Writing ", "Wrote "), ("Running: ", "Ran: "), ("Searching ", "Searched "),
+        ("Sending a helper: ", "Helper: "), ("Updating ", "Updated "), ("Loading ", "Loaded "),
+        ("Using ", "Used ")]
+
+
+def past_tense(label):
+    for now, then in PAST:
+        if label.startswith(now):
+            return then + label[len(now):]
+    return label
+
+
+def _short(text, n=60):
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def _plural(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def describe_result(name, inp, result, content, is_error):
+    """A few words on how a finished step went, e.g. "130 lines" or "exit code 2".
+
+    `result` is Claude Code's structured tool_use_result (its shape differs per tool and
+    between versions, so everything here is best effort); `content` is the plain text
+    the model saw.
+    """
+    if isinstance(content, list):  # [{"type": "text", "text": ...}, ...]
+        content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+    content = str(content or "")
+    try:
+        if is_error:
+            low = content.lower()
+            if "user said no" in low or "doesn't want to proceed" in low or "rejected" in low:
+                return "you said no"
+            if "user stopped" in low or "interrupted" in low:
+                return "stopped"
+            lines = [l for l in content.splitlines() if l.strip()]
+            if lines and lines[0].lower().startswith("exit code"):
+                return _short(lines[0].lower() + (" · " + lines[1] if len(lines) > 1 else ""))
+            return _short(lines[0] if lines else "failed")
+        r = result if isinstance(result, dict) else {}
+        if name == "Read":
+            n = (r.get("file") or {}).get("numLines")
+            return _plural(n, "line") if isinstance(n, int) else ""
+        if name == "Bash":
+            out = (r.get("stdout") or "").strip() if r else content.strip()
+            if r.get("backgroundTaskId"):
+                return "running in the background"
+            if not out:
+                return "done"
+            lines = out.splitlines()
+            return _short(lines[0], 50) if len(lines) == 1 else _plural(len(lines), "line") + " of output"
+        if name in ("Edit", "MultiEdit"):
+            added = removed = 0
+            for hunk in r.get("structuredPatch") or []:
+                for l in hunk.get("lines", []):
+                    added += l.startswith("+")
+                    removed += l.startswith("-")
+            return f"+{added} −{removed}" if added or removed else "saved"
+        if name == "Write":
+            return "new file" if r.get("type") == "create" else "saved"
+        if name == "Grep":
+            if r.get("mode") == "content" and isinstance(r.get("numLines"), int):
+                return _plural(r["numLines"], "matching line")
+            if isinstance(r.get("numFiles"), int):
+                return "no matches" if r["numFiles"] == 0 else _plural(r["numFiles"], "file")
+        if name == "Glob" and isinstance(r.get("numFiles"), int):
+            return _plural(r["numFiles"], "file")
+        if name == "WebSearch":
+            hits = sum(len(x.get("content") or []) for x in r.get("results") or [] if isinstance(x, dict))
+            return _plural(hits, "result") if hits else ""
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return ""

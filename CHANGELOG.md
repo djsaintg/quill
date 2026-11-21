@@ -1,5 +1,8 @@
 # 📜 Changelog
 
+## Unreleased
+- **Live steps in the bubble:** while Claude works you see each step as it happens (`⠋ Reading app.py…`), then a one-liner once it's done (`✓ Read app.py · 130 lines`, `✗ Ran: … · exit code 2`), with Claude's notes in between; a helper's step shows what the helper is doing
+
 ## v0.4.0 — 2026-11-20
 - **Plume**, a second character (a feather instead of an antenna), with her own expressions
 - First-start chooser: Quill on the left in `classic` colours, Plume on the right in `aurora`; `/character` switches, and the `quill` / `plume` commands open their own character

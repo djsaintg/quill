@@ -17,12 +17,14 @@ from textual.message import Message
 from textual.widgets import Button, Input, Markdown, Static, TextArea
 
 from . import notify, perms, sessions, sudo
-from .engine import Engine, clean_env, describe_tool, find_claude
+from .engine import Engine, clean_env, describe_result, describe_tool, find_claude, past_tense
 from . import themes
 from .sprites import CHARACTERS, PALETTE, sprite
 
 __version__ = "0.4.0"
 BG = "#1a1c2c"
+
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 GREETING = ("Hi! I'm **Quill**, your desk robot. "
             "Ask me anything, or tell me what we're working on.\n\n"
@@ -257,6 +259,12 @@ class QuillApp(App):
     #bubble { border: round $q-accent; background: $q-bg; padding: 0;
               height: auto; max-height: 100%; scrollbar-size-vertical: 1; }
     #bubble Markdown { background: $q-panel; margin: 0; padding: 0 1; height: auto; }
+    #turn { height: auto; display: none; }
+    .step { background: $q-panel; color: $q-muted; padding: 0 1; height: 1;
+             text-wrap: nowrap; text-overflow: ellipsis; }
+    #turn Markdown.after { padding: 1 1 0 1; }
+    .step.run { color: $q-accent; }
+    .step.err { color: $error; }
     #status { height: 1; color: $q-muted; padding: 0 2; }
     #choices { height: auto; padding: 0 2; display: none; }
     #choices.show { display: block; }
@@ -300,7 +308,8 @@ class QuillApp(App):
         self.model = ""
         self.busy = False
         self.tool_active = False
-        self.turn_text = ""
+        self.turn_text = ""  # the words of this reply (for copy, history, pop-ups)
+        self.parts = []  # the same reply as shown: text pieces and the steps between them
         self.streamed_ids = set()
         self.dirty = False
         self.flushing = False
@@ -350,6 +359,7 @@ class QuillApp(App):
             yield Static("◀", id="tail")
             with VerticalScroll(id="bubble"):
                 yield Markdown(GREETING.replace("Quill", self.char_name), id="say")
+                yield Vertical(id="turn")
         yield Static("", id="status")
         yield Horizontal(id="choices")
         yield Static("", id="you")
@@ -427,6 +437,7 @@ class QuillApp(App):
     # ---------- animation ----------
     def animate(self):
         self.tick += 1
+        self.spin()
         now = time.monotonic()
         if self.pending or self.dialog:
             face, bulb = "ask", ("ask" if self.tick % 4 < 2 else "off")
@@ -445,12 +456,108 @@ class QuillApp(App):
             self.query_one("#quill", Static).update(
                 render_sprite(sprite(self.who, face, bulb), self.scale, self.pal, self.bgc))
 
+    # ---------- the reply, step by step ----------
+    def new_turn(self):
+        self.turn_text, self.parts = "", []
+
+    def add_text(self, text, new_block=False):
+        """Claude's words. A new text block after a step starts a new piece."""
+        if not self.parts or self.parts[-1]["kind"] != "text":
+            self.parts.append({"kind": "text", "text": ""})
+        elif new_block and self.parts[-1]["text"] and not self.parts[-1]["text"].endswith("\n\n"):
+            self.parts[-1]["text"] += "\n\n"
+        self.parts[-1]["text"] += text
+        if new_block and self.turn_text and not self.turn_text.endswith("\n\n"):
+            self.turn_text += "\n\n"
+        self.turn_text += text
+
+    def step(self, tool_id):
+        return next((p for p in self.parts if p["kind"] == "step" and p["id"] == tool_id), None)
+
+    def add_step(self, block):
+        if self.step(block.get("id")):
+            return
+        self.parts.append({"kind": "step", "id": block.get("id"), "name": block.get("name"),
+                           "input": block.get("input") or {}, "state": "run", "note": "", "helper": ""})
+        self.reveal()
+
+    def end_step(self, ev, block):
+        p = self.step(block.get("tool_use_id"))
+        if not p:
+            return
+        err = bool(block.get("is_error"))
+        p["note"] = describe_result(p["name"], p["input"], ev.get("tool_use_result"),
+                                    block.get("content"), err)
+        p["state"], p["helper"] = ("err" if err else "ok"), ""
+        self.reveal()
+
+    def reveal(self):
+        """Show the reply so far, unless a question for you is on screen."""
+        if self.pending or self.dialog:
+            self.dirty = True  # it'll show once you've answered
+        else:
+            self.show_reply()
+
+    def step_line(self, p):
+        label = describe_tool(p["name"], p["input"])
+        if p["state"] == "run":
+            line = f"{SPINNER[self.tick % len(SPINNER)]} {label}…"
+            if p["helper"]:
+                line += f"  ·  {p['helper']}"
+        else:
+            mark = {"ok": "✓", "err": "✗", "stopped": "■"}[p["state"]]
+            line = f"{mark} {past_tense(label)}" + (f"  ·  {p['note']}" if p["note"] else "")
+        return Text(line, overflow="ellipsis", no_wrap=True)
+
+    async def sync_turn(self):
+        """Make the widgets in #turn match self.parts (one per text piece or step)."""
+        turn = self.query_one("#turn")
+        have = list(turn.children)
+        kinds = [("text" if isinstance(w, Markdown) else "step") for w in have]
+        if len(have) > len(self.parts) or kinds != [p["kind"] for p in self.parts[:len(have)]]:
+            await turn.remove_children()
+            have = []
+        for i, p in enumerate(self.parts):
+            if i >= len(have):
+                w = (Markdown("", classes="after" if i else "") if p["kind"] == "text"
+                     else Static("", classes="step"))
+                w.shown = None
+                await turn.mount(w)
+                have.append(w)
+            w = have[i]
+            if p["kind"] == "text":
+                if w.shown != p["text"]:
+                    w.shown = p["text"]
+                    await w.update(p["text"])
+            else:
+                w.part = p
+                w.set_class(p["state"] == "run", "run")
+                w.set_class(p["state"] == "err", "err")
+                w.update(self.step_line(p))
+
+    def spin(self):
+        """Turn the spinner on running steps without redrawing the whole reply."""
+        if self.override is not None or not self.busy:
+            return
+        try:
+            for w in self.query_one("#turn").children:
+                if getattr(w, "part", None) and w.part["state"] == "run":
+                    w.update(self.step_line(w.part))
+        except NoMatches:
+            pass
+
     async def flush(self):
         if self.dirty and not self.flushing:
             self.dirty, self.flushing = False, True
-            text = self.override if self.override is not None else (self.turn_text or "…")
             try:
-                await self.query_one("#say", Markdown).update(text)
+                say, turn = self.query_one("#say", Markdown), self.query_one("#turn")
+                steps = self.override is None and bool(self.parts)
+                say.display, turn.display = not steps, steps
+                if steps:
+                    await self.sync_turn()
+                else:
+                    await say.update(self.override if self.override is not None
+                                     else (self.turn_text or "…"))
                 bubble = self.query_one("#bubble")
                 if self.override is not None and self.show_top:
                     bubble.scroll_home(animate=False)
@@ -522,14 +629,13 @@ class QuillApp(App):
                 block = e.get("content_block", {})
                 if block.get("type") == "text":
                     self.tool_active = False
-                    if self.turn_text and not self.turn_text.endswith("\n\n"):
-                        self.turn_text += "\n\n"
+                    self.add_text("", new_block=True)
                 elif block.get("type") == "thinking":
                     self.status("Thinking…")
             elif e.get("type") == "content_block_delta":
                 d = e.get("delta", {})
                 if d.get("type") == "text_delta":
-                    self.turn_text += d.get("text", "")
+                    self.add_text(d.get("text", ""))
                     self.last_delta = time.monotonic()
                     if not self.pending:
                         self.show_reply()
@@ -539,13 +645,19 @@ class QuillApp(App):
             for block in msg.get("content", []):
                 if block.get("type") == "tool_use":
                     if sub_agent:
-                        self.status("A helper is working…")
-                    elif not self.pending:
-                        self.tool_active = True
-                        self.status(describe_tool(block.get("name"), block.get("input")))
+                        doing = describe_tool(block.get("name"), block.get("input"))
+                        parent = self.step(ev.get("parent_tool_use_id"))
+                        if parent:
+                            parent["helper"] = doing
+                        self.status("A helper is working… " + doing)
+                    else:
+                        self.add_step(block)
+                        if not self.pending:
+                            self.tool_active = True
+                            self.status(describe_tool(block.get("name"), block.get("input")))
                 elif (block.get("type") == "text" and not sub_agent
                       and msg.get("id") not in self.streamed_ids):
-                    self.turn_text += ("\n\n" if self.turn_text else "") + block.get("text", "")
+                    self.add_text(block.get("text", ""), new_block=True)
                     if not self.pending:
                         self.show_reply()
 
@@ -562,7 +674,7 @@ class QuillApp(App):
             self.log_items.append(("you", text))
             self.query_one("#you", Static).update(Text("you (remote): " + text, overflow="ellipsis"))
             if not self.busy:
-                self.turn_text = ""
+                self.new_turn()
                 self.turn_t0 = time.monotonic()
             self.busy = True
             self.status("Thinking…")
@@ -572,6 +684,9 @@ class QuillApp(App):
             if isinstance(content, list) and any(
                     isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
                 self.tool_active = False  # that step finished; Claude is thinking again
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                        self.end_step(ev, b)
                 if not self.pending:
                     self.status("Thinking…")
 
@@ -583,10 +698,13 @@ class QuillApp(App):
         elif t == "result":
             self.busy = False
             self.tool_active = False
+            for p in self.parts:
+                if p["kind"] == "step" and p["state"] == "run":
+                    p["state"] = "stopped"  # never got an answer (stopped with Esc)
             if ev.get("is_error") or ev.get("subtype", "success") != "success":
                 err = ev.get("result") or ev.get("subtype", "error")
                 if not self.turn_text:
-                    self.turn_text = f"Something went wrong:\n\n`{err}`"
+                    self.add_text(f"Something went wrong:\n\n`{err}`", new_block=True)
                 self.feel("sad", 4)
                 self.status("Stopped")
             else:
@@ -834,7 +952,8 @@ class QuillApp(App):
             self.action_history()
             return
         if cmd in ("/new", "/clear"):
-            self.log_items, self.turn_text, self.busy = [], "", False
+            self.log_items, self.busy = [], False
+            self.new_turn()
             self.claude_args = strip_resume(self.claude_args)
             self.show("Fresh start! What's next?")
             self.query_one("#you", Static).update("")
@@ -850,7 +969,7 @@ class QuillApp(App):
         self.log_items.append(("you", text))
         self.query_one("#you", Static).update(Text("you: " + text, overflow="ellipsis"))
         if not self.busy:
-            self.turn_text = ""
+            self.new_turn()
             self.turn_t0 = time.monotonic()
             self.show("…")
         else:
@@ -1130,7 +1249,8 @@ class QuillApp(App):
             return
         self.claude_args = strip_resume(self.claude_args) + (["--resume", p["session"]] if resume else [])
         self.log_items = sessions.transcript_file(p["path"]) if resume else []
-        self.turn_text, self.busy = "", False
+        self.new_turn()
+        self.busy = False
         self.set_title()
         self.start_engine()
         box = self.query_one("#input", ChatBox)
